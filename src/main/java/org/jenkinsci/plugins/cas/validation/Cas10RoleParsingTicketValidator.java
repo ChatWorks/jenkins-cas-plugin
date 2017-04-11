@@ -1,7 +1,6 @@
 package org.jenkinsci.plugins.cas.validation;
 
-import groovy.lang.GroovyShell;
-import groovy.lang.Script;
+import groovy.lang.Binding;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -19,6 +18,8 @@ import org.jasig.cas.client.validation.AbstractCasProtocolUrlBasedTicketValidato
 import org.jasig.cas.client.validation.Assertion;
 import org.jasig.cas.client.validation.AssertionImpl;
 import org.jasig.cas.client.validation.TicketValidationException;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.groovy.SecureGroovyScript;
+import org.jenkinsci.plugins.scriptsecurity.scripts.ApprovalContext;
 
 /**
  * Implementation of a Ticket Validator that can validate tickets conforming to the CAS 1.0 specification.
@@ -33,7 +34,7 @@ public class Cas10RoleParsingTicketValidator extends AbstractCasProtocolUrlBased
 
 	private String rolesValidationScript;
 	private String rolesAttribute = DEFAULT_ROLE_ATTRIBUTE;
-	private Script parsedScript;
+	private SecureGroovyScript parsedScript;
 
 	public Cas10RoleParsingTicketValidator(final String casServerUrlPrefix) {
 		super(casServerUrlPrefix);
@@ -83,13 +84,22 @@ public class Cas10RoleParsingTicketValidator extends AbstractCasProtocolUrlBased
 	 * @return list of roles
 	 */
 	@SuppressWarnings("rawtypes")
-	public static List<String> parseRolesFromValidationResponse(Script script, String response) {
+	public static List<String> parseRolesFromValidationResponse(SecureGroovyScript script, String response) {
 		if (script == null)
 			return null;
 
-		// Run the script to parse the response
-		script.getBinding().setVariable("response", response);
-		Collection coll = (Collection) script.run();
+        script.configuring(ApprovalContext.create());
+        
+        Binding binding = new Binding();
+        binding.setVariable("response", response);
+        
+        Collection coll;
+        try {
+          coll = (Collection) script.evaluate(Cas10RoleParsingTicketValidator.class.getClassLoader(), binding);
+        } catch (Exception ex) {
+          throw new IllegalArgumentException("insecure script", ex);
+        }
+
 		if (coll == null || coll.isEmpty())
 			return null;
 
@@ -108,9 +118,9 @@ public class Cas10RoleParsingTicketValidator extends AbstractCasProtocolUrlBased
 	 * Get the parsed Groovy roles validation script.
 	 * @return parsed Groovy script
 	 */
-	protected synchronized Script getParsedScript() {
+	protected synchronized SecureGroovyScript getParsedScript() {
 		if (parsedScript == null && StringUtils.isNotEmpty(rolesValidationScript)) {
-			parsedScript = new GroovyShell().parse(rolesValidationScript);
+			parsedScript = new SecureGroovyScript(rolesValidationScript, true, null);
 		}
 		return parsedScript;
 	}

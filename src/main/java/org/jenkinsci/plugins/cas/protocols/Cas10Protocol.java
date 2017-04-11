@@ -1,7 +1,5 @@
 package org.jenkinsci.plugins.cas.protocols;
 
-import groovy.lang.GroovyShell;
-import groovy.lang.Script;
 import hudson.Extension;
 import hudson.Util;
 import hudson.model.Descriptor;
@@ -14,6 +12,7 @@ import org.jasig.cas.client.validation.TicketValidator;
 import org.jenkinsci.plugins.cas.CasProtocol;
 import org.jenkinsci.plugins.cas.Messages;
 import org.jenkinsci.plugins.cas.validation.Cas10RoleParsingTicketValidator;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.groovy.SecureGroovyScript;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 
@@ -58,8 +57,8 @@ public class Cas10Protocol extends CasProtocol {
 				@QueryParameter("rolesValidationScript") final String rolesValidationScript,
 				@QueryParameter("testValidationResponse") final String testValidationResponse) {
 			try {
-				Script script = new GroovyShell().parse(rolesValidationScript);
-				Collection roles = Cas10RoleParsingTicketValidator.parseRolesFromValidationResponse(script, testValidationResponse);
+				SecureGroovyScript secureGroovyScript = new SecureGroovyScript(rolesValidationScript, true, null);
+				Collection roles = Cas10RoleParsingTicketValidator.parseRolesFromValidationResponse(secureGroovyScript, testValidationResponse);
 				if (roles == null) {
 					return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_noResult());
 				}
