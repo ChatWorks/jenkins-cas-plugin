@@ -104,7 +104,7 @@ public final class CasRestAuthenticator implements InitializingBean, Authenticat
 					throw new AuthenticationServiceException("Could not fetch service ticket from CAS");
 				}
 			} finally {
-				destroyGrantingTicket(grantingTicket);
+				// destroyGrantingTicket(grantingTicket);
 			}
 		} else {
 			throw new AuthenticationServiceException("Could not fetch granting ticket from CAS");
