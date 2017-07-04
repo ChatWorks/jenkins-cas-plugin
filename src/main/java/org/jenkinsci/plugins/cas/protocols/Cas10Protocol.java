@@ -1,12 +1,5 @@
 package org.jenkinsci.plugins.cas.protocols;
 
-import groovy.lang.GroovyShell;
-import groovy.lang.Script;
-import hudson.Extension;
-import hudson.Util;
-import hudson.model.Descriptor;
-import hudson.util.FormValidation;
-
 import java.util.Collection;
 
 import org.codehaus.groovy.control.CompilationFailedException;
@@ -14,8 +7,18 @@ import org.jasig.cas.client.validation.TicketValidator;
 import org.jenkinsci.plugins.cas.CasProtocol;
 import org.jenkinsci.plugins.cas.Messages;
 import org.jenkinsci.plugins.cas.validation.Cas10RoleParsingTicketValidator;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.RejectedAccessException;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.groovy.SecureGroovyScript;
+import org.jenkinsci.plugins.scriptsecurity.scripts.UnapprovedClasspathException;
+import org.jenkinsci.plugins.scriptsecurity.scripts.UnapprovedUsageException;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
+
+import hudson.Extension;
+import hudson.Util;
+import hudson.model.Descriptor;
+import hudson.util.FormValidation;
+import jenkins.model.Jenkins;
 
 /**
  * CAS 1.0 protocol support.
@@ -27,11 +30,21 @@ public class Cas10Protocol extends CasProtocol {
 
 	public final String rolesValidationScript;
 	public final String testValidationResponse;
+	public final boolean sandbox;
+
+	private final SecureGroovyScript secureRolesValidationScript;
+
+	@Deprecated
+	public Cas10Protocol(String rolesValidationScript, String testValidationResponse) {
+		this(rolesValidationScript, testValidationResponse, false);
+	}
 
 	@DataBoundConstructor
-	public Cas10Protocol(String rolesValidationScript, String testValidationResponse) {
+	public Cas10Protocol(String rolesValidationScript, String testValidationResponse, boolean sandbox) {
 		this.rolesValidationScript = Util.fixEmptyAndTrim(rolesValidationScript);
 		this.testValidationResponse = Util.fixEmpty(testValidationResponse);
+		this.sandbox = sandbox;
+		this.secureRolesValidationScript = getSecureGroovyScript(this.rolesValidationScript, this.sandbox);
 	}
 
 	@Override
@@ -42,8 +55,12 @@ public class Cas10Protocol extends CasProtocol {
 	@Override
 	public TicketValidator createTicketValidator(String casServerUrl) {
 		Cas10RoleParsingTicketValidator ticketValidator = new Cas10RoleParsingTicketValidator(casServerUrl);
-		ticketValidator.setRolesValidationScript(rolesValidationScript);
+		ticketValidator.setRolesValidationScript(secureRolesValidationScript);
 		return ticketValidator;
+	}
+
+	private static SecureGroovyScript getSecureGroovyScript(String script, boolean sandbox) {
+		return new SecureGroovyScript(script, sandbox, null).configuringWithKeyItem();
 	}
 
 	@Extension
@@ -56,19 +73,34 @@ public class Cas10Protocol extends CasProtocol {
 		@SuppressWarnings("rawtypes")
 		public FormValidation doTestScript(
 				@QueryParameter("rolesValidationScript") final String rolesValidationScript,
-				@QueryParameter("testValidationResponse") final String testValidationResponse) {
+				@QueryParameter("testValidationResponse") final String testValidationResponse,
+				@QueryParameter("sandbox") final boolean sandbox) {
+			if (!canRunScripts()) {
+				return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_noRunScriptPermissionError());
+			}
 			try {
-				Script script = new GroovyShell().parse(rolesValidationScript);
-				Collection roles = Cas10RoleParsingTicketValidator.parseRolesFromValidationResponse(script, testValidationResponse);
+				Collection roles = Cas10RoleParsingTicketValidator.parseRolesFromValidationResponse(getSecureGroovyScript(rolesValidationScript, sandbox), testValidationResponse);
 				if (roles == null) {
-					return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_noResult());
+					return FormValidation.warning(Messages.Cas10Protocol_rolesValidationScript_noResult());
 				}
 				return FormValidation.ok(Messages.Cas10Protocol_rolesValidationScript_result() + ": " + roles);
 			} catch (CompilationFailedException e) {
 				return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_compilationError() + ": " + e);
 			} catch (ClassCastException e) {
 				return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_returnTypeError() + ": " + e);
+			} catch (RejectedAccessException e) {
+				return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_rejectedAccessError() + ": " + e);
+			} catch (UnapprovedUsageException e) {
+				return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_unapprovedUsageError() + ": " + e);
+			} catch (UnapprovedClasspathException e) {
+				return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_unapprovedClasspathError() + ": " + e);
+			} catch (Exception e) {
+				return FormValidation.error(Messages.Cas10Protocol_rolesValidationScript_unknownError() + ": " + e);
 			}
+		}
+
+		private boolean canRunScripts() {
+			return Jenkins.getInstance().getACL().hasPermission(Jenkins.RUN_SCRIPTS);
 		}
 	}
 
